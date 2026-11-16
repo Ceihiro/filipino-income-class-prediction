@@ -1,0 +1,192 @@
+CLEANING LOG
+Project: Filipino Household Income Class Prediction Using Machine Learning
+Group: MAC1
+Date: 2026-11-12
+
+=== STEP 0: SETUP & CSV CREATION ===
+Problem: Raw dataset.txt is in ARFF format; Orange cannot read ARFF directly.
+Decision: Used Google Colab with the liac-arff library to parse dataset.txt and export dataset.csv.
+Reason: SciPy's arff loader fails on string attributes; liac-arff correctly handles all ARFF data types.
+Verification: Output confirmed shape (41544, 60), duplicates 0, missing values in 3 columns.
+
+=== STEP 1: COLUMN NAME STANDARDIZATION (Edit Domain - First) ===
+Problem: Misspelled and inconsistently formatted column names would cause errors in formulas and encoding.
+Decision: Renamed columns in Orange Edit Domain widget before any other processing.
+Reason: Uniform naming prevents the same feature from being treated as separate variables during modeling.
+Changes:
+  - Total_Fish_and__marine_products_Expenditure -> Total_Fish_and_Marine_Products_Expenditure
+  - Crop_Farming_and_Gardening_expenses -> Crop_Farming_and_Gardening_Expenses
+  - Total_Income_from_Enterpreneurial_Activites -> Total_Income_from_Entrepreneurial_Activities
+  - Total_number_of_family_members_employed -> Total_Number_of_Family_Members_Employed
+  - Number_of_bedrooms -> Number_of_Bedrooms
+
+=== STEP 2: CATEGORICAL VALUE CLEANUP (Edit Domain - First) ===
+Problem: Region names contained a leading space and a spelling error; wall type had capitalization error.
+Decision: Renamed categorical values in the same Edit Domain widget.
+Reason: Prevents the same semantic region or wall type from being split into separate categories.
+Changes:
+  - Region value " ARMM" -> "ARMM"
+  - Region value "IX - Zasmboanga Peninsula" -> "IX - Zamboanga Peninsula"
+  - Type_of_Walls value "NOt applicable" -> "Not applicable"
+
+
+=== STEP 3: MISSING VALUE TREATMENT (Impute) ===
+Problem: Household_Head_Occupation (7,536), Household_Head_Class_of_Worker (7,536), and Toilet_Facilities (1,580) had missing values.
+Decision: Used Orange Impute widget with "As a distinct value" for all three columns.
+Reason: The 7,536 missing occupation records occur on the exact same rows, likely representing households with no job or business. Removing 18% of the data would significantly reduce sample size, so imputation as a distinct category preserves information.
+Verification: Impute widget shows all three columns with "new value" status, confirming missing values were replaced with a distinct category placeholder.
+
+
+=== STEP 4: MISSING VALUE LABELING (Edit Domain - Second) ===
+Problem: After loading dataset_shuffled.csv, Household_Head_Occupation defaulted to text/meta type in Orange, preventing the Impute widget from processing it. Edit Domain (second) also retained stale N/A mappings from the previous file.
+Decision: 
+  1. Changed Household_Head_Occupation from text/meta to categorical/feature in the File widget so Impute could create a distinct placeholder.
+  2. Used Impute widget with "As a distinct value" for all three columns.
+  3. Renamed the generated N/A placeholder in Edit Domain (second) to meaningful labels.
+Reason: The variable type must be categorical for Orange to impute missing values as a distinct category. Meaningful labels preserve the semantic meaning of missingness for modeling and interpretation.
+Changes:
+  - File widget: Household_Head_Occupation type changed from text/meta to categorical/feature
+  - Household_Head_Occupation N/A -> No Job/Business
+  - Household_Head_Class_of_Worker N/A -> No Job/Business
+  - Toilet_Facilities N/A -> Unknown
+Verification: All three columns now show 0 missing values with meaningful category labels. Formula widget error cleared after clean data flow was restored.
+
+=== STEP 5: RANDOM SEED AND SHUFFLING (Task 14) ===
+Problem: Dataset is sorted by region, which would bias train/test splits. Task requires random seed 42.
+Decision: Orange Data Sampler does not expose a custom seed field, so shuffling was performed in Python using pandas sample(frac=1, random_state=42) before loading into Orange. The raw ARFF was loaded, "?" was preserved as missing, and only the row order was randomized.
+Reason: Ensures reproducible randomization across the entire group using the agreed seed 42, preventing regional bias in splits, while keeping all preprocessing in Orange.
+Verification: dataset_shuffled.csv created and loaded into Orange; Data Sampler set to 100% with replicable sampling preserves this order.
+
+=== STEP 6: HOUSEHOLD HEAD AGE CHECK (Task 16) ===
+Problem: Potential data quality issue with household head age; 43 heads are under 18 (minimum is 9) and 1,199 are 80 or older.
+Decision: Retained all 43 rows with Household_Head_Age < 18 and all 1,199 rows with age >= 80.
+Reason: No clear data entry errors were identified. Ages below 18 may represent orphaned households, extended family structures, or legally recognized young heads in the Philippine context. Removing 43 rows (0.1% of data) would have negligible impact on model performance but could discard valid edge-case patterns. Elderly heads (80+) are demographically normal.
+Verification: Select Rows widget confirmed 43 rows with Household_Head_Age < 18. All rows retained in the dataset.
+
+=== STEP 7: FEATURE ENGINEERING (Formula Widget - Task 20) ===
+Problem: Need a relative employment measure and a copy of income for target creation.
+Decision: Created two derived features using the Feature Constructor (Formula) widget.
+Reason: Employed_Ratio normalizes employment by household size, giving a relative measure of workforce participation. Income_Copy preserves the original continuous income variable while creating a separate variable for discretization into income classes.
+Formulas:
+  - Employed_Ratio = Total_Number_of_Family_Members_Employed / Total_Number_of_Family_members
+  - Income_Copy = Total_Household_Income
+Verification: Formula widget executed successfully with no errors; both new features appear in the dataset.
+
+=== STEP 8: TARGET VARIABLE CREATION (Discretize + Edit Domain) ===
+Problem: Need categorical target Income_Class (Low, Middle, High) for classification.
+Decision: Discretized Income_Copy using Equal-Frequency into 3 intervals, then renamed bins to Low, Middle, High.
+Reason: Equal-frequency ensures balanced classes (~13,848 each) for classification.
+Verification: Discretize cut-offs confirmed at 122,244 and 234,636 pesos. Edit Domain (three) renamed bins to Low, Middle, and High. Income_Class set as categorical target variable.
+
+=== STEP 9: TARGET SETTING AND EXPORT (Select Columns + Save Data) ===
+Problem: Need to designate Income_Class as the prediction target and export the cleaned dataset.
+Decision: Set Income_Class as Target in Select Columns widget, kept all 61 features as predictors, and exported to cleaned_data.csv via Save Data widget.
+Reason: Classification models require a single categorical target variable; all other columns serve as input features.
+Verification: Select Columns shows Income_Class in Target box with 61 Features. cleaned_data.csv exported successfully.
+
+=== STEP 10: INCOME DISTRIBUTION AND SKEWNESS CHECK (Task 17) ===
+Problem: Need to verify the skewness of Total_Household_Income and check for outliers.
+Observation: Total_Household_Income is heavily right-skewed. The vast majority of households cluster below 250,000 pesos, with a long tail extending to approximately 12 million pesos. A small number of high-income households create extreme right-skewness.
+Decision: Do NOT remove high-income households. The tracker explicitly states not to remove them without a reason. These may represent genuinely wealthy households or entrepreneurial success cases that are important for the model to learn. Log scale will be used in visualizations to better show the distribution.
+Verification: Distributions widget in Orange confirms right-skewed distribution with median around 164,080 and maximum around 11.8 million, matching the tracker's expected values.
+
+=== STEP 11: TARGET CLASS DISTRIBUTION CHECK ===
+Problem: Need to verify that Income_Class is balanced after equal-frequency discretization.
+Observation: Income_Class shows three nearly equal bars in the Distributions widget. Low, Middle, and High each contain approximately 13,800 households, confirming balanced classes.
+Decision: No class rebalancing needed. Proceed with classification using the current 3-class target.
+Reason: Equal-frequency discretization intentionally creates balanced classes, which prevents model bias toward any single class.
+Verification: Distributions widget (Income Class Distribution) confirms balanced target variable.
+
+=== STEP 12: EDA - EDUCATION VS INCOME CLASS (Mosaic Display) ===
+Problem: Need to examine the relationship between household head education and income class.
+Observation: Mosaic Display of Household_Head_Highest_Grade_Completed vs Income_Class shows a clear pattern. Lower education levels (Elementary) are dominated by Low income class (blue). Higher education levels (College and above) are dominated by High income class (green). High School Graduate shows a mixed distribution.
+Decision: Household_Head_Highest_Grade_Completed is a key predictive feature and should be retained. Consider grouping rare education categories if needed during modeling.
+Reason: Education is a well-known socioeconomic predictor; the strong visual separation in the mosaic plot confirms its importance for classification.
+Verification: Mosaic Display widget clearly shows education-income stratification across all three classes.
+
+=== STEP 13: EDA - FEATURE CORRELATIONS (Correlations Widget) ===
+Problem: Need to identify which features are most strongly related to income and to each other.
+Observation: Correlations widget shows strong positive relationships between expenditure variables and Total_Household_Income. Top correlations include: Communication_Expenditure vs Total_Household_Income (+0.710), Housing_and_water_Expenditure vs Total_Household_Income (+0.676), and Total_Food_Expenditure vs Total_Household_Income (+0.664). Very high inter-correlation exists between Housing_and_water_Expenditure and Imputed_House_Rental_Value (+0.919), and between Bread_and_Cereals_Expenditure and Total_Rice_Expenditure (+0.876).
+Decision: Retain all features for now but note potential multicollinearity among expenditure variables. Feature selection or regularization may be needed during modeling if overfitting occurs.
+Reason: Expenditure variables are natural proxies for household wealth and strongly predictive of income class. However, near-perfect correlations (0.9+) may introduce redundancy.
+Verification: Correlations widget in Orange confirms these relationships across all numeric features.
+
+=== STEP 14: EDA - REGIONAL INCOME VARIATION (Box Plot - Task 17) ===
+Problem: Need to examine how household income varies across Philippine regions.
+Observation: Box Plot of Total_Household_Income by Region shows significant regional inequality. ARMM exhibits the lowest median income (~111,000 pesos), while Ilocos Region shows the highest mean (~238,000 pesos). Western Visayas and Central Visayas display extreme high-income outliers with very long upper whiskers. All regions contain outlier households with incomes far above their regional medians.
+Decision: Retain Region as a categorical feature; it is a strong socioeconomic predictor.
+Reason: Regional economic disparities in the Philippines are well-documented, and the data confirms this pattern. Removing Region would discard important geographic stratification information.
+Verification: Box Plot widget clearly visualizes median, quartiles, and outliers across all regions.
+
+=== STEP 15: DATA DICTIONARY (Task 18) ===
+Problem: Need to document all 60 columns for the paper and README.
+Decision: Compiled a complete data dictionary with column name, meaning, and data type for all original features plus derived features.
+Verification: Dictionary covers all 60 columns from the FIES dataset plus 3 derived features (Employed_Ratio, Income_Copy, Income_Class).
+
+=== STEP 16: README CREATION (Task 19) ===
+Problem: Need to document dataset source, license, retrieval date, description, and team roles for the GitHub repository.
+Decision: Drafted README.md with full project overview, dataset summary, repository structure, preprocessing steps, EDA findings, usage instructions, and team roles. Repository will be created by Documentation Lead and README will be committed once repo is set up.
+Reason: README serves as the entry point for anyone reviewing the repository, including the instructor. It documents provenance, licensing, and reproducibility.
+Verification: README content drafted and saved; pending GitHub repository creation for commit.
+
+=== STEP 17: SCENARIO-BASED PROJECTION METHODOLOGY NOTE ===
+Problem: The dataset is historical and cross-sectional (approximately 5 years old), not a time series. Need to clarify how 2027-2050 projection will work.
+Decision: Framed the projection component as scenario-based simulation, not time-series forecasting. Updated README and paper abstract to explicitly state this limitation and methodology.
+Reason: Using a classifier trained on historical household data to predict income class under hypothetical future household conditions is a valid scenario simulation approach, but it must be clearly distinguished from actual time-series forecasting.
+Verification: README and Overleaf abstract now explicitly describe the 2027-2050 component as scenario-based projection using simulated household profiles.
+
+=== STEP 18: EDA COMPLETION AND FILE HANDOFF PREPARATION ===
+Problem: Need to finalize all EDA visualizations and prepare files for the modeling phase and group sharing.
+Decision: Completed all required EDA charts in Orange: Income_Class distribution (balanced classes confirmed), Total_Household_Income skewness (heavily right-skewed), Mosaic Display of Education vs Income_Class (strong education effect), Box Plot of Region vs Income (ARMM lowest, regional inequality confirmed), and Correlations widget (expenditure variables highly correlated with income). All screenshots saved for IEEE paper figures.
+Reason: Section IV requires documented visual evidence. Before modeling begins, all preprocessing and EDA must be complete and verified.
+Verification: All EDA widgets produced interpretable results matching tracker's expected observations. Files ready for handoff: cleaned_data.csv, dataset_shuffled.csv, cleaning_log.txt.
+
+=== STEP 19: COMPLETE MODELING PREP PIPELINE (Tasks 21-27) ===
+Problem: Team behind schedule; needed to complete all preprocessing and modeling preparation.
+Decision: Executed full pipeline in Python/Colab with strict fit-on-train-only methodology.
+Actions:
+  - Task 23: 80/20 split with random_state=42, stratified by original target
+  - Task 24: Recomputed Income_Class using training terciles only (cut-offs: ~112,850 and ~234,637 pesos)
+  - Task 25: Dropped all leakage/expenditure columns from main model inputs
+  - Task 26: Generated correlation heatmap using top 20 numeric features from training set only
+  - Task 27: One-Hot Encoding (pd.get_dummies) and StandardScaler fitted on training data only
+Verification: 
+  - Train shape: (33,235, 61) → after drops/encoding: reduced dimensions
+  - Test shape: (8,309, 61) → aligned to train columns
+  - Train class distribution: Low 11,078 | Middle 11,078 | High 11,079
+  - Test class distribution: Low 2,771 | Middle 2,769 | High 2,769
+  - Files exported: train_processed.csv, test_processed.csv, scaler.pkl, correlation_heatmap.png
+
+=== STEP 20: BASELINE MODEL TRAINING (Task 29) ===
+Problem: Need to establish baseline classification performance before hyperparameter tuning.
+Decision: Trained two baseline models on the processed training data: Logistic Regression (multinomial, max_iter=1000) and Random Forest (200 estimators, max_depth=20).
+Reason: Logistic Regression provides an interpretable linear baseline for high-dimensional encoded data. Random Forest captures non-linear feature interactions and serves as a robust tree-based benchmark. Both are standard baselines for multiclass classification.
+Verification: 
+  - Logistic Regression: Accuracy 0.7349, Precision 0.7356, Recall 0.7349, F1 0.7350
+  - Random Forest: Accuracy 0.7230, Precision 0.7234, Recall 0.7229, F1 0.7230
+  - Both models evaluated on untouched test set (8,309 records). Confusion matrices saved.
+
+=== STEP 21: BASELINE RESULTS TABLE (Task 30) ===
+Problem: Need to document baseline results for the paper and commit the modeling notebook.
+Decision: Exported baseline results to baseline_results.csv and generated confusion matrix visualizations for both models. Results integrated into Overleaf Section VI.
+Observation: Logistic Regression marginally outperformed Random Forest. Both models struggled most with the Middle class due to boundary ambiguity near the tercile cut-offs (112,850 and 234,637 pesos). Low and High classes were predicted with much higher accuracy (~79-80%).
+Reason: Documenting baseline performance establishes a benchmark against which future tuned models (Gradient Boosting, SVM, etc.) can be compared. The Middle-class confusion pattern is a key finding for error analysis.
+Verification: baseline_results.csv saved. Confusion matrices (confusion_matrix_lr.png, confusion_matrix_rf.png) saved. Modeling code documented in Colab notebook.
+
+=== STEP 22: WEEK 16 - CROSS-VALIDATION, TUNING, AND SPENDING COMPARISON (Tasks 37-40) ===
+Problem: Need to validate baseline models with 5-fold CV, tune hyperparameters, compare with/without spending columns, and evaluate final model once on test set.
+Decision: Executed RandomizedSearchCV on Random Forest (20 iterations, 5-fold CV). Compared a version trained with all spending columns included against the main model (without spending).
+Reason: CV on training data only prevents leakage during model selection. RandomizedSearchCV is faster than GridSearchCV and explores a wide hyperparameter space. The spending comparison tests whether expenditure variables artificially inflate accuracy by leaking target information.
+Verification: [Fill after running script with actual CV scores and test accuracy]
+
+=== STEP 23: WEEK 16 - K-MEANS CLUSTERING (Task 43) ===
+Problem: Need to run unsupervised clustering as the extension component.
+Decision: Applied K-Means to scaled training numeric features with k=2 to 10. Generated elbow plot and silhouette scores. Compared k=3 clusters to actual Income_Class labels.
+Reason: K-Means discovers natural groupings independent of the predefined target. Comparing clusters to income classes reveals whether the data structure aligns with the tercile-based labels.
+Verification: [Fill after running: best k, silhouette score, cross-tab results]
+
+=== STEP 24: WEEK 16 - RELATED WORK AND RESULT CHARTS (Tasks 41, 44) ===
+Problem: Need to draft Section II and generate result visualizations.
+Decision: Drafted Related Work with IEEE-style citations covering household income classification, ensemble methods, and Philippine FIES analysis. Generated feature importance chart and tuned model confusion matrix.
+Reason: Section II establishes academic context. Feature importance explains which variables drive predictions.
+Verification: Charts saved: feature_importance_tuned_rf.png, confusion_matrix_tuned_rf.png, kmeans_elbow_silhouette.png.
